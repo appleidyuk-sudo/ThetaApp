@@ -6,6 +6,7 @@ import SwiftUI
 struct DashboardView: View {
     @EnvironmentObject var store: ThetaStore
     @EnvironmentObject var config: ThetaConfig
+    @State private var showHelp = false
 
     var body: some View {
         ZStack {
@@ -22,6 +23,7 @@ struct DashboardView: View {
             }
         }
         .refreshable { await store.refreshPrices() }
+        .sheet(isPresented: $showHelp) { HelpSheet(screen: .dashboard) }
     }
 
     // MARK: - Header
@@ -29,9 +31,14 @@ struct DashboardView: View {
     private var headerSection: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("ThetaApp")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("ThetaApp")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(kAppVersion)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(red: 1.0, green: 1.0, blue: 0.0))
+                }
 
                 if let lastUpdate = store.lastUpdated {
                     Text("Updated \(lastUpdate, style: .relative) ago")
@@ -41,6 +48,13 @@ struct DashboardView: View {
             }
 
             Spacer()
+
+            // Help button
+            Button { showHelp = true } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(AppColors.gold)
+            }
 
             // Auto-execute toggle
             Button {

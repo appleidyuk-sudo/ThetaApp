@@ -8,10 +8,28 @@ struct SettingsView: View {
     @EnvironmentObject var config: ThetaConfig
 
     @State private var showResetConfirm = false
+    @State private var showHelp = false
 
     var body: some View {
         ZStack {
             AppBackground()
+
+            VStack(spacing: 0) {
+                // Header bar
+                HStack {
+                    Text("Settings")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Button { showHelp = true } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 20))
+                            .foregroundColor(AppColors.gold)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
             List {
                 // Account
@@ -190,7 +208,9 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
+            } // end VStack
         }
+        .sheet(isPresented: $showHelp) { HelpSheet(screen: .settings) }
         .alert("Reset Simulation?", isPresented: $showResetConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {

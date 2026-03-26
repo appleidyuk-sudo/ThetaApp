@@ -8,6 +8,7 @@ struct WatchlistView: View {
     @EnvironmentObject var config: ThetaConfig
 
     @State private var showAddSheet = false
+    @State private var showHelp = false
     @State private var selectedPosition: WheelPosition?
     @State private var sortOption: SortOption = .symbol
     @State private var sortAscending = true
@@ -49,6 +50,7 @@ struct WatchlistView: View {
             }
         }
         .sheet(isPresented: $showAddSheet) { AddSymbolSheet() }
+        .sheet(isPresented: $showHelp) { HelpSheet(screen: .positions) }
         .sheet(item: $selectedPosition) { pos in
             PositionDetailView(position: pos)
         }
@@ -63,6 +65,12 @@ struct WatchlistView: View {
                 .foregroundColor(.white)
 
             Spacer()
+
+            Button { showHelp = true } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(AppColors.gold)
+            }
 
             Button { showAddSheet = true } label: {
                 Image(systemName: "plus.circle.fill")
