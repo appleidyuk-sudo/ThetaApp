@@ -253,8 +253,10 @@ actor WheelEngine {
         case .assigned:
             optionType = .call
             position.phase = .sellingCalls
-        case .sellingPuts, .sellingCalls:
-            return nil  // Already in a writing phase with no active option — write
+        case .sellingPuts:
+            optionType = .put   // already in put phase, proceed to write
+        case .sellingCalls:
+            optionType = .call  // already in call phase, proceed to write
         }
 
         // Check write threshold
