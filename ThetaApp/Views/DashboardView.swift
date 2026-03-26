@@ -7,6 +7,7 @@ struct DashboardView: View {
     @EnvironmentObject var store: ThetaStore
     @EnvironmentObject var config: ThetaConfig
     @State private var showHelp = false
+    @State private var showPauseWarning = false
 
     var body: some View {
         ZStack {
@@ -24,6 +25,14 @@ struct DashboardView: View {
         }
         .refreshable { await store.refreshPrices() }
         .sheet(isPresented: $showHelp) { HelpSheet(screen: .dashboard) }
+        .alert("Pause Auto-Execute?", isPresented: $showPauseWarning) {
+            Button("Keep Running", role: .cancel) {}
+            Button("Pause", role: .destructive) {
+                store.stopAutoExecution()
+            }
+        } message: {
+            Text("Rolls, new writes, and expiration handling will not run automatically. You'll need to tap ↻ manually or re-enable auto to avoid missing trades.")
+        }
     }
 
     // MARK: - Header
@@ -49,10 +58,11 @@ struct DashboardView: View {
 
             Spacer()
 
-            // Auto-execute toggle — labeled so it's clear
+            // Auto-execute toggle — warns before pausing
             Button {
-                if store.statusMessage?.contains("Auto-execute every") == true {
-                    store.stopAutoExecution()
+                let isRunning = store.statusMessage?.contains("Auto-execute every") == true
+                if isRunning {
+                    showPauseWarning = true  // confirm before stopping
                 } else {
                     store.startAutoExecution()
                 }
