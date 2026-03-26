@@ -49,14 +49,7 @@ struct DashboardView: View {
 
             Spacer()
 
-            // Help button
-            Button { showHelp = true } label: {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 20))
-                    .foregroundColor(AppColors.gold)
-            }
-
-            // Auto-execute toggle
+            // Auto-execute toggle — labeled so it's clear
             Button {
                 if store.statusMessage?.contains("Auto-execute every") == true {
                     store.stopAutoExecution()
@@ -64,9 +57,18 @@ struct DashboardView: View {
                     store.startAutoExecution()
                 }
             } label: {
-                Image(systemName: config.autoExecute ? "play.circle.fill" : "pause.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(AppColors.orange)
+                let isRunning = store.statusMessage?.contains("Auto-execute every") == true
+                HStack(spacing: 4) {
+                    Image(systemName: isRunning ? "pause.fill" : "play.fill")
+                        .font(.system(size: 10))
+                    Text(isRunning ? "AUTO" : "AUTO")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .foregroundColor(isRunning ? AppColors.green : AppColors.muted)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background((isRunning ? AppColors.green : Color.white).opacity(0.12))
+                .clipShape(Capsule())
             }
 
             // Manual execute
@@ -74,10 +76,17 @@ struct DashboardView: View {
                 Task { await store.executeWheelCycle() }
             } label: {
                 Image(systemName: "arrow.clockwise.circle.fill")
-                    .font(.system(size: 24))
+                    .font(.system(size: 22))
                     .foregroundColor(store.isRefreshing ? .gray : AppColors.gold)
             }
             .disabled(store.isRefreshing)
+
+            // Help button
+            Button { showHelp = true } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(AppColors.gold)
+            }
         }
     }
 

@@ -158,21 +158,25 @@ class ThetaStore: ObservableObject {
     // MARK: - Symbol Management
 
     func addSymbol(_ symbol: String, weight: Double) {
-        guard !positions.contains(where: { $0.symbol.uppercased() == symbol.uppercased() }) else { return }
-        var position = WheelPosition(symbol: symbol.uppercased(), weight: weight)
-
-        // Fetch initial price
-        Task {
-            if let quote = try? await YahooFinanceService.shared.fetchQuote(symbol: symbol.uppercased()) {
-                if let idx = positions.firstIndex(where: { $0.symbol == symbol.uppercased() }) {
-                    positions[idx].currentPrice = quote.price
-                }
-            }
-        }
+        let sym = symbol.uppercased()
+        guard !positions.contains(where: { $0.symbol == sym }) else { return }
+        var position = WheelPosition(symbol: sym, weight: weight)
+        position.phase = .sellingPuts  // immediately wheel-ready
 
         positions.append(position)
         rebalanceWeights()
         saveState()
+
+        // Fetch price and kick off first wheel cycle for this symbol
+        Task {
+            if let quote = try? await YahooFinanceService.shared.fetchQuote(symbol: sym) {
+                if let idx = positions.firstIndex(where: { $0.symbol == sym }) {
+                    positions[idx].currentPrice = quote.price
+                }
+            }
+            // Auto-execute first cycle so the position is live immediately
+            await executeWheelCycle()
+        }
     }
 
     func removeSymbol(_ symbol: String) {
