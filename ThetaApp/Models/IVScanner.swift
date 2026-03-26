@@ -20,11 +20,14 @@ actor IVScanner {
     static let shared = IVScanner()
 
     // Popular wheel-friendly tickers: liquid, optionable, well-known
-    // Covers mega-cap tech, financials, energy, consumer, ETFs
+    // Covers mega-cap tech, semis, financials, energy, consumer, ETFs
     static let wheelUniverse: [String] = [
-        // Tech
-        "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "AMD", "TSLA",
-        "INTC", "PLTR", "SOFI", "SNAP", "UBER", "COIN", "HOOD", "MARA",
+        // Tech / Software
+        "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA",
+        "PLTR", "SOFI", "SNAP", "UBER", "COIN", "HOOD", "MARA",
+        "APP", "SHOP", "CRWD", "NET", "DDOG", "SNOW",
+        // Semiconductors
+        "NVDA", "AMD", "INTC", "MU", "AVGO", "QCOM", "MRVL", "ARM", "SMCI",
         // Financials
         "JPM", "BAC", "GS", "C", "WFC", "SCHW",
         // Energy
@@ -34,7 +37,7 @@ actor IVScanner {
         // Healthcare
         "PFE", "JNJ", "ABBV", "MRK",
         // ETFs (great for wheel)
-        "SPY", "QQQ", "IWM", "EEM", "XLF", "XLE", "GDX", "SLV",
+        "SPY", "QQQ", "IWM", "EEM", "XLF", "XLE", "GDX", "SLV", "TQQQ",
         // High IV favorites
         "MSTR", "RIVN", "LCID", "NIO", "BABA", "GME", "AMC",
     ]
@@ -134,8 +137,9 @@ actor IVScanner {
 
     /// Quick scan of a smaller subset for faster loading
     func quickScan(limit: Int = 8) async -> [IVCandidate] {
-        let quickList = ["TSLA", "NVDA", "AMD", "COIN", "PLTR", "MSTR", "SOFI",
-                         "RIVN", "MARA", "NIO", "SPY", "QQQ", "IWM", "GME"]
+        let quickList = ["TSLA", "NVDA", "AMD", "MU", "APP", "COIN", "PLTR",
+                         "MSTR", "SOFI", "SMCI", "RIVN", "MARA", "ARM",
+                         "SPY", "QQQ", "IWM", "GME"]
 
         var candidates: [IVCandidate] = []
 
