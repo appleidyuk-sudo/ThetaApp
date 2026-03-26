@@ -1,5 +1,5 @@
 // WatchlistView.swift — Position list with wheel status
-// DHCbot-style list rows with dark theme
+// DHCbot-style list rows with dark theme, sector-organized
 
 import SwiftUI
 
@@ -10,7 +10,7 @@ struct WatchlistView: View {
     @State private var showAddSheet = false
     @State private var showHelp = false
     @State private var selectedPosition: WheelPosition?
-    @State private var sortOption: SortOption = .symbol
+    @State private var sortOption: PositionSort = .sector
     @State private var sortAscending = true
 
     private var sortedPositions: [WheelPosition] {
@@ -18,8 +18,11 @@ struct WatchlistView: View {
         switch sortOption {
         case .symbol:
             sorted = store.positions.sorted { $0.symbol < $1.symbol }
-        case .phase:
-            sorted = store.positions.sorted { $0.phase.rawValue < $1.phase.rawValue }
+        case .sector:
+            sorted = store.positions.sorted {
+                if $0.sector == $1.sector { return $0.symbol < $1.symbol }
+                return $0.sector < $1.sector
+            }
         case .pnl:
             sorted = store.positions.sorted { $0.totalPremiumCollected > $1.totalPremiumCollected }
         case .dte:
@@ -35,13 +38,9 @@ struct WatchlistView: View {
             AppBackground()
 
             VStack(spacing: 0) {
-                // Header
                 headerBar
-
-                // Sort headers
                 sortHeaders
 
-                // Position list
                 if store.positions.isEmpty {
                     emptyState
                 } else {
@@ -87,34 +86,29 @@ struct WatchlistView: View {
 
     private var sortHeaders: some View {
         HStack(spacing: 0) {
-            sortHeaderButton("SYMBOL", option: .symbol)
-            sortHeaderButton("PHASE", option: .phase)
+            ForEach(PositionSort.allCases, id: \.self) { opt in
+                sortButton(opt.rawValue, selected: sortOption == opt) {
+                    if sortOption == opt { sortAscending.toggle() }
+                    else { sortOption = opt; sortAscending = true }
+                }
+            }
             Spacer()
-            sortHeaderButton("DTE", option: .dte)
-            sortHeaderButton("P&L", option: .pnl)
         }
         .padding(.horizontal)
         .padding(.vertical, 4)
     }
 
-    private func sortHeaderButton(_ label: String, option: SortOption) -> some View {
-        Button {
-            if sortOption == option {
-                sortAscending.toggle()
-            } else {
-                sortOption = option
-                sortAscending = true
-            }
-        } label: {
+    private func sortButton(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 2) {
                 Text(label)
-                    .font(.system(size: 10, weight: sortOption == option ? .bold : .medium))
-                if sortOption == option {
+                    .font(.system(size: 10, weight: selected ? .bold : .medium))
+                if selected {
                     Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                 }
             }
-            .foregroundColor(.white.opacity(sortOption == option ? DesignTokens.Text.secondary : DesignTokens.Text.muted))
+            .foregroundColor(.white.opacity(selected ? DesignTokens.Text.secondary : DesignTokens.Text.muted))
             .padding(.horizontal, 8)
         }
     }
@@ -123,19 +117,56 @@ struct WatchlistView: View {
 
     private var positionList: some View {
         List {
-            ForEach(sortedPositions) { position in
-                PositionRow(position: position)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectedPosition = position }
+            // When sorting by sector, show section headers
+            if sortOption == .sector {
+                let grouped = Dictionary(grouping: sortedPositions, by: { $0.sector })
+                let sectors = grouped.keys.sorted()
+                ForEach(sortAscending ? sectors : sectors.reversed(), id: \.self) { sector in
+                    Section {
+                        ForEach(grouped[sector] ?? []) { position in
+                            positionRowView(position)
+                        }
+                        .onDelete { offsets in
+                            for idx in offsets {
+                                if let sym = grouped[sector]?[idx].symbol {
+                                    store.removeSymbol(sym)
+                                }
+                            }
+                        }
+                    } header: {
+                        sectorHeader(sector)
+                    }
+                }
+            } else {
+                ForEach(sortedPositions) { position in
+                    positionRowView(position)
+                }
+                .onDelete(perform: deletePositions)
             }
-            .onDelete(perform: deletePositions)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .refreshable { await store.refreshPrices() }
+    }
+
+    private func positionRowView(_ position: WheelPosition) -> some View {
+        PositionRow(position: position)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .contentShape(Rectangle())
+            .onTapGesture { selectedPosition = position }
+    }
+
+    private func sectorHeader(_ sector: Sector) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(sector.color)
+                .frame(width: 3, height: 12)
+            Text(sector.rawValue.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(sector.color)
+        }
     }
 
     private func deletePositions(at offsets: IndexSet) {
@@ -170,85 +201,82 @@ struct PositionRow: View {
     let position: WheelPosition
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Main row
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                // Phase icon
-                Image(systemName: position.phase.icon)
-                    .foregroundColor(position.phase.color)
-                    .font(.system(size: 18))
-                    .frame(width: 24)
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            // Phase icon
+            Image(systemName: position.phase.icon)
+                .foregroundColor(position.phase.color)
+                .font(.system(size: 18))
+                .frame(width: 24)
 
-                // Symbol + info
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(position.symbol)
-                            .font(.system(size: 15, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-
-                        Text(position.phase.shortLabel)
-                            .pillBadge(color: position.phase.color)
-
-                        if position.shares > 0 {
-                            Text("\(position.shares)sh")
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundColor(AppColors.cyan)
-                        }
-
-                        Text("\(Int(position.weight * 100))%")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white.opacity(DesignTokens.Text.muted))
-                    }
-
-                    // Active option info
-                    if let opt = position.currentActiveOption {
-                        HStack(spacing: 8) {
-                            Text(opt.contract.displayLabel)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(opt.contract.optionType.color)
-
-                            Text("δ\(fmtDelta(opt.contract.delta))")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.white.opacity(DesignTokens.Text.tertiary))
-
-                            Text(fmtDTE(opt.dte))
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(opt.dte <= 15 ? AppColors.red : AppColors.yellow)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                // Price + P&L column
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(fmtPrice(position.currentPrice))
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+            // Symbol + info
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(position.symbol)
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
 
-                    if let opt = position.currentActiveOption {
-                        let pnl = opt.pnlTotal
-                        Text(pnl >= 0 ? "+\(fmtDollar(pnl))" : fmtDollar(pnl))
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(pnl >= 0 ? AppColors.green : AppColors.red)
+                    Text(position.phase.shortLabel)
+                        .pillBadge(color: position.phase.color)
 
-                        Text(fmtSignedPct(opt.pnlPercent))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(opt.pnlPercent >= 0 ? AppColors.green : AppColors.red)
+                    Text(position.sector.rawValue)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(position.sector.color)
+
+                    if position.shares > 0 {
+                        Text("\(position.shares)sh")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(AppColors.cyan)
                     }
                 }
 
-                // Premium collected
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(fmtDollar(position.totalPremiumCollected))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(AppColors.green)
+                // Active option info
+                if let opt = position.currentActiveOption {
+                    HStack(spacing: 8) {
+                        Text(opt.contract.displayLabel)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(opt.contract.optionType.color)
 
-                    if position.wheelCycleCount > 0 {
-                        Text("×\(position.wheelCycleCount)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(AppColors.gold)
+                        Text("δ\(fmtDelta(opt.contract.delta))")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(DesignTokens.Text.tertiary))
+
+                        Text(fmtDTE(opt.dte))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(opt.dte <= 15 ? AppColors.red : AppColors.yellow)
                     }
+                }
+            }
+
+            Spacer()
+
+            // Price + P&L column
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(fmtPrice(position.currentPrice))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+
+                if let opt = position.currentActiveOption {
+                    let pnl = opt.pnlTotal
+                    Text(pnl >= 0 ? "+\(fmtDollar(pnl))" : fmtDollar(pnl))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(pnl >= 0 ? AppColors.green : AppColors.red)
+
+                    Text(fmtSignedPct(opt.pnlPercent))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(opt.pnlPercent >= 0 ? AppColors.green : AppColors.red)
+                }
+            }
+
+            // Premium collected
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(fmtDollar(position.totalPremiumCollected))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(AppColors.green)
+
+                if position.wheelCycleCount > 0 {
+                    Text("×\(position.wheelCycleCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(AppColors.gold)
                 }
             }
         }
@@ -269,6 +297,26 @@ struct AddSymbolSheet: View {
     @State private var errorMessage: String?
     @State private var suggestions: [IVCandidate] = []
     @State private var isScanning = false
+    @State private var recSort: RecommendationSort = .iv
+    @State private var recSortAsc = false  // IV defaults descending (highest first)
+
+    private var sortedSuggestions: [IVCandidate] {
+        let sorted: [IVCandidate]
+        switch recSort {
+        case .symbol:
+            sorted = suggestions.sorted { $0.symbol < $1.symbol }
+        case .sector:
+            sorted = suggestions.sorted {
+                if $0.sector == $1.sector { return $0.symbol < $1.symbol }
+                return $0.sector < $1.sector
+            }
+        case .iv:
+            sorted = suggestions.sorted { $0.iv > $1.iv }
+        case .yield:
+            sorted = suggestions.sorted { $0.premiumYield > $1.premiumYield }
+        }
+        return recSortAsc ? sorted : sorted.reversed()
+    }
 
     var body: some View {
         NavigationView {
@@ -347,6 +395,7 @@ struct AddSymbolSheet: View {
 
     private var ivSuggestionsSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            // Header row
             HStack {
                 Image(systemName: "flame.fill")
                     .foregroundColor(AppColors.orange)
@@ -360,6 +409,14 @@ struct AddSymbolSheet: View {
                         .scaleEffect(0.7)
                         .tint(AppColors.gold)
                 } else {
+                    // Full scan button
+                    Button {
+                        Task { await fullScan() }
+                    } label: {
+                        Text("All")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(AppColors.gold)
+                    }
                     Button {
                         Task { await loadSuggestions() }
                     } label: {
@@ -374,19 +431,82 @@ struct AddSymbolSheet: View {
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(DesignTokens.Text.faint))
 
+            // Sort headers for recommendations
+            recSortHeaders
+
             if suggestions.isEmpty && !isScanning {
                 Text("Tap refresh to scan for high-IV candidates")
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(DesignTokens.Text.muted))
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 12)
+            } else if recSort == .sector {
+                // Grouped by sector
+                let grouped = Dictionary(grouping: sortedSuggestions, by: { $0.sector })
+                let sectors = grouped.keys.sorted()
+                ForEach(sectors, id: \.self) { sector in
+                    sectorGroupHeader(sector)
+                    ForEach(grouped[sector] ?? []) { candidate in
+                        suggestionRow(candidate)
+                    }
+                }
             } else {
-                ForEach(suggestions) { candidate in
+                ForEach(sortedSuggestions) { candidate in
                     suggestionRow(candidate)
                 }
             }
         }
     }
+
+    // MARK: - Recommendation Sort Headers
+
+    private var recSortHeaders: some View {
+        HStack(spacing: 0) {
+            ForEach(RecommendationSort.allCases, id: \.self) { opt in
+                recSortButton(opt)
+            }
+            Spacer()
+        }
+    }
+
+    private func recSortButton(_ opt: RecommendationSort) -> some View {
+        let selected = recSort == opt
+        return Button {
+            if recSort == opt { recSortAsc.toggle() }
+            else {
+                recSort = opt
+                // Default descending for IV and Yield, ascending for Name and Sector
+                recSortAsc = (opt == .symbol || opt == .sector)
+            }
+        } label: {
+            HStack(spacing: 2) {
+                Text(opt.rawValue)
+                    .font(.system(size: 10, weight: selected ? .bold : .medium))
+                if selected {
+                    Image(systemName: recSortAsc ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+            }
+            .foregroundColor(.white.opacity(selected ? DesignTokens.Text.secondary : DesignTokens.Text.muted))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func sectorGroupHeader(_ sector: Sector) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(sector.color)
+                .frame(width: 3, height: 12)
+            Text(sector.rawValue.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(sector.color)
+            Spacer()
+        }
+        .padding(.top, 8)
+    }
+
+    // MARK: - Suggestion Row
 
     private func suggestionRow(_ candidate: IVCandidate) -> some View {
         let alreadyAdded = store.positions.contains { $0.symbol == candidate.symbol }
@@ -400,15 +520,20 @@ struct AddSymbolSheet: View {
                 // IV rank bar
                 ivRankIndicator(candidate.ivRank)
 
-                // Symbol
-                Text(candidate.symbol)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(alreadyAdded ? .white.opacity(0.3) : .white)
-                    .frame(width: 50, alignment: .leading)
+                // Symbol + sector
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(candidate.symbol)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(alreadyAdded ? .white.opacity(0.3) : .white)
+                    Text(candidate.sector.rawValue)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(candidate.sector.color)
+                }
+                .frame(width: 55, alignment: .leading)
 
                 // Price
                 Text(fmtPrice(candidate.price))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(DesignTokens.Text.secondary))
 
                 Spacer()
@@ -464,7 +589,7 @@ struct AddSymbolSheet: View {
     private func ivRankIndicator(_ rank: Double) -> some View {
         RoundedRectangle(cornerRadius: 2)
             .fill(ivColor(rank).opacity(0.8))
-            .frame(width: 4, height: 28)
+            .frame(width: 4, height: 32)
     }
 
     private func ivColor(_ iv: Double) -> Color {
@@ -480,6 +605,13 @@ struct AddSymbolSheet: View {
         guard !isScanning else { return }
         isScanning = true
         defer { isScanning = false }
-        suggestions = await IVScanner.shared.quickScan(limit: 10)
+        suggestions = await IVScanner.shared.quickScan()
+    }
+
+    private func fullScan() async {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
+        suggestions = await IVScanner.shared.scanHighIV()
     }
 }

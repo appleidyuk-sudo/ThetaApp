@@ -172,6 +172,7 @@ struct ActiveOption: Identifiable, Codable {
 struct WheelPosition: Identifiable, Codable {
     let id: UUID
     let symbol: String
+    let sector: Sector
     var weight: Double            // target portfolio weight (0.0–1.0)
     var phase: WheelPhase
     var shares: Int               // shares owned (0 if selling puts)
@@ -197,9 +198,10 @@ struct WheelPosition: Identifiable, Codable {
         activeOptions.first { !$0.isClosed }
     }
 
-    init(symbol: String, weight: Double) {
+    init(symbol: String, weight: Double, sector: Sector? = nil) {
         self.id = UUID()
         self.symbol = symbol
+        self.sector = sector ?? sectorFor(symbol)
         self.weight = weight
         self.phase = .idle
         self.shares = 0
@@ -268,13 +270,94 @@ struct PortfolioSnapshot: Identifiable, Codable {
     }
 }
 
-// MARK: - Sort Options
+// MARK: - Sector
 
-enum SortOption: String, CaseIterable {
-    case symbol     = "Symbol"
-    case phase      = "Phase"
-    case pnl        = "P&L"
-    case dte        = "DTE"
+enum Sector: String, Codable, CaseIterable, Comparable {
+    case tech         = "Tech"
+    case semis        = "Semis"
+    case fintech      = "FinTech"
+    case financials   = "Financials"
+    case energy       = "Energy"
+    case consumer     = "Consumer"
+    case healthcare   = "Healthcare"
+    case etf          = "ETF"
+    case crypto       = "Crypto"
+    case ev           = "EV"
+    case meme         = "Meme"
+    case unknown      = "Other"
+
+    var color: Color {
+        switch self {
+        case .tech:        return AppColors.blue
+        case .semis:       return AppColors.purple
+        case .fintech:     return AppColors.cyan
+        case .financials:  return AppColors.gold
+        case .energy:      return AppColors.orange
+        case .consumer:    return AppColors.pink
+        case .healthcare:  return AppColors.green
+        case .etf:         return AppColors.yellow
+        case .crypto:      return AppColors.orange
+        case .ev:          return AppColors.cyan
+        case .meme:        return AppColors.red
+        case .unknown:     return AppColors.muted
+        }
+    }
+
+    static func < (lhs: Sector, rhs: Sector) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+/// Lookup table: symbol → sector
+let sectorMap: [String: Sector] = [
+    // Tech / Software
+    "AAPL": .tech, "MSFT": .tech, "AMZN": .tech, "GOOGL": .tech, "META": .tech,
+    "TSLA": .tech, "PLTR": .tech, "SNAP": .tech, "UBER": .tech,
+    "APP": .tech, "SHOP": .tech, "CRWD": .tech, "NET": .tech, "DDOG": .tech, "SNOW": .tech,
+    // Semiconductors
+    "NVDA": .semis, "AMD": .semis, "INTC": .semis, "MU": .semis,
+    "AVGO": .semis, "QCOM": .semis, "MRVL": .semis, "ARM": .semis, "SMCI": .semis,
+    // FinTech / Crypto-adjacent
+    "SOFI": .fintech, "HOOD": .fintech, "COIN": .crypto, "MARA": .crypto, "MSTR": .crypto,
+    // Financials
+    "JPM": .financials, "BAC": .financials, "GS": .financials,
+    "C": .financials, "WFC": .financials, "SCHW": .financials,
+    // Energy
+    "XOM": .energy, "CVX": .energy, "OXY": .energy, "SLB": .energy, "DVN": .energy,
+    // Consumer / Retail
+    "NKE": .consumer, "DIS": .consumer, "SBUX": .consumer,
+    "TGT": .consumer, "WMT": .consumer, "COST": .consumer,
+    // Healthcare
+    "PFE": .healthcare, "JNJ": .healthcare, "ABBV": .healthcare, "MRK": .healthcare,
+    // ETFs
+    "SPY": .etf, "QQQ": .etf, "IWM": .etf, "EEM": .etf,
+    "XLF": .etf, "XLE": .etf, "GDX": .etf, "SLV": .etf, "TQQQ": .etf,
+    // EV
+    "RIVN": .ev, "LCID": .ev, "NIO": .ev,
+    // Meme
+    "GME": .meme, "AMC": .meme, "BABA": .tech,
+]
+
+func sectorFor(_ symbol: String) -> Sector {
+    sectorMap[symbol.uppercased()] ?? .unknown
+}
+
+// MARK: - Sort Options (Positions)
+
+enum PositionSort: String, CaseIterable {
+    case symbol  = "Name"
+    case sector  = "Sector"
+    case dte     = "DTE"
+    case pnl     = "P&L"
+}
+
+// MARK: - Sort Options (Recommendations)
+
+enum RecommendationSort: String, CaseIterable {
+    case symbol  = "Name"
+    case sector  = "Sector"
+    case iv      = "IV"
+    case yield   = "Yield"
 }
 
 // MARK: - App Colors (DHCbot style)

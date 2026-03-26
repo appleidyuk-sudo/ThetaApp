@@ -6,6 +6,7 @@ import Foundation
 struct IVCandidate: Identifiable {
     let id = UUID()
     let symbol: String
+    let sector: Sector
     let price: Double
     let iv: Double              // annualized implied vol from ATM options
     let ivRank: Double          // 0–1 rank within scanned universe
@@ -44,8 +45,8 @@ actor IVScanner {
 
     private let yahoo = YahooFinanceService.shared
 
-    /// Scan universe and return candidates sorted by IV (highest first)
-    func scanHighIV(limit: Int = 15) async -> [IVCandidate] {
+    /// Scan full universe and return ALL candidates sorted by IV (highest first)
+    func scanHighIV() async -> [IVCandidate] {
         var candidates: [IVCandidate] = []
 
         // Fetch in parallel batches of 8 to avoid throttling
@@ -82,6 +83,7 @@ actor IVScanner {
             let rank = 1.0 - (Double(i) / Double(max(1, count - 1)))
             candidates[i] = IVCandidate(
                 symbol: candidates[i].symbol,
+                sector: candidates[i].sector,
                 price: candidates[i].price,
                 iv: candidates[i].iv,
                 ivRank: rank,
@@ -90,7 +92,7 @@ actor IVScanner {
             )
         }
 
-        return Array(candidates.prefix(limit))
+        return candidates  // no cap — return all
     }
 
     /// Fetch IV data for a single symbol
@@ -124,6 +126,7 @@ actor IVScanner {
 
             return IVCandidate(
                 symbol: symbol,
+                sector: sectorFor(symbol),
                 price: price,
                 iv: atm.impliedVol,
                 ivRank: 0, // will be set after sorting
@@ -135,13 +138,11 @@ actor IVScanner {
         }
     }
 
-    /// Quick scan of a smaller subset for faster loading
-    func quickScan(limit: Int = 8) async -> [IVCandidate] {
+    /// Quick scan of a curated subset for faster initial loading — returns ALL results
+    func quickScan() async -> [IVCandidate] {
         let quickList = ["TSLA", "NVDA", "AMD", "MU", "APP", "COIN", "PLTR",
                          "MSTR", "SOFI", "SMCI", "RIVN", "MARA", "ARM",
-                         "SPY", "QQQ", "IWM", "GME"]
-
-        var candidates: [IVCandidate] = []
+                         "SPY", "QQQ", "IWM", "GME", "AVGO", "CRWD", "SNAP"]
 
         let results = await withTaskGroup(of: IVCandidate?.self) { group in
             for symbol in quickList {
@@ -155,8 +156,7 @@ actor IVScanner {
             }
             return all
         }
-        candidates = results.sorted { $0.iv > $1.iv }
 
-        return Array(candidates.prefix(limit))
+        return results.sorted { $0.iv > $1.iv }  // no cap — return all
     }
 }
