@@ -259,51 +259,56 @@ struct AddSymbolSheet: View {
     @State private var symbol = ""
     @State private var weight = 0.20
     @State private var errorMessage: String?
+    @State private var suggestions: [IVCandidate] = []
+    @State private var isScanning = false
 
     var body: some View {
         NavigationView {
             ZStack {
                 AppBackground()
 
-                VStack(spacing: DesignTokens.Spacing.lg) {
-                    // Symbol input
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("SYMBOL")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white.opacity(DesignTokens.Text.muted))
-
-                        TextField("AAPL", text: $symbol)
-                            .textFieldStyle(.roundedBorder)
-                            .autocapitalization(.allCharacters)
-                            .disableAutocorrection(true)
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    }
-
-                    // Weight slider
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("PORTFOLIO WEIGHT")
+                ScrollView {
+                    VStack(spacing: DesignTokens.Spacing.lg) {
+                        // Symbol input
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SYMBOL")
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(.white.opacity(DesignTokens.Text.muted))
-                            Spacer()
-                            Text("\(Int(weight * 100))%")
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .foregroundColor(AppColors.gold)
+
+                            TextField("AAPL", text: $symbol)
+                                .textFieldStyle(.roundedBorder)
+                                .autocapitalization(.allCharacters)
+                                .disableAutocorrection(true)
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
                         }
 
-                        Slider(value: $weight, in: 0.05...1.0, step: 0.05)
-                            .tint(AppColors.gold)
-                    }
+                        // Weight slider
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("PORTFOLIO WEIGHT")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                                Spacer()
+                                Text("\(Int(weight * 100))%")
+                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                    .foregroundColor(AppColors.gold)
+                            }
 
-                    if let err = errorMessage {
-                        Text(err)
-                            .font(.system(size: 12))
-                            .foregroundColor(AppColors.red)
-                    }
+                            Slider(value: $weight, in: 0.05...1.0, step: 0.05)
+                                .tint(AppColors.gold)
+                        }
 
-                    Spacer()
+                        if let err = errorMessage {
+                            Text(err)
+                                .font(.system(size: 12))
+                                .foregroundColor(AppColors.red)
+                        }
+
+                        // High IV Suggestions
+                        ivSuggestionsSection
+                    }
+                    .padding()
                 }
-                .padding()
             }
             .navigationTitle("Add Symbol")
             .navigationBarTitleDisplayMode(.inline)
@@ -326,6 +331,147 @@ struct AddSymbolSheet: View {
                     .bold()
                 }
             }
+            .task { await loadSuggestions() }
         }
+    }
+
+    // MARK: - IV Suggestions Section
+
+    private var ivSuggestionsSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            HStack {
+                Image(systemName: "flame.fill")
+                    .foregroundColor(AppColors.orange)
+                    .font(.system(size: 12))
+                Text("HIGH IV SUGGESTIONS")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                Spacer()
+                if isScanning {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(AppColors.gold)
+                } else {
+                    Button {
+                        Task { await loadSuggestions() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .foregroundColor(AppColors.gold)
+                    }
+                }
+            }
+
+            Text("Ranked by implied volatility — higher IV = more premium")
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(DesignTokens.Text.faint))
+
+            if suggestions.isEmpty && !isScanning {
+                Text("Tap refresh to scan for high-IV candidates")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(suggestions) { candidate in
+                    suggestionRow(candidate)
+                }
+            }
+        }
+    }
+
+    private func suggestionRow(_ candidate: IVCandidate) -> some View {
+        let alreadyAdded = store.positions.contains { $0.symbol == candidate.symbol }
+
+        return Button {
+            if !alreadyAdded {
+                symbol = candidate.symbol
+            }
+        } label: {
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                // IV rank bar
+                ivRankIndicator(candidate.ivRank)
+
+                // Symbol
+                Text(candidate.symbol)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(alreadyAdded ? .white.opacity(0.3) : .white)
+                    .frame(width: 50, alignment: .leading)
+
+                // Price
+                Text(fmtPrice(candidate.price))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.white.opacity(DesignTokens.Text.secondary))
+
+                Spacer()
+
+                // IV
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("IV")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                    Text(candidate.ivLabel)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(ivColor(candidate.iv))
+                }
+
+                // Premium yield
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Yield")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                    Text(candidate.yieldLabel)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(AppColors.green)
+                }
+
+                // Est. 30d premium
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("~30d")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.white.opacity(DesignTokens.Text.muted))
+                    Text(fmtPrice(candidate.premium30d))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(AppColors.gold)
+                }
+
+                // Status
+                if alreadyAdded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(AppColors.green)
+                        .font(.system(size: 14))
+                } else {
+                    Image(systemName: "plus.circle")
+                        .foregroundColor(AppColors.gold)
+                        .font(.system(size: 14))
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .cardStyle()
+        }
+        .disabled(alreadyAdded)
+    }
+
+    private func ivRankIndicator(_ rank: Double) -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(ivColor(rank).opacity(0.8))
+            .frame(width: 4, height: 28)
+    }
+
+    private func ivColor(_ iv: Double) -> Color {
+        if iv > 0.80 { return AppColors.red }
+        if iv > 0.50 { return AppColors.orange }
+        if iv > 0.30 { return AppColors.yellow }
+        return AppColors.green
+    }
+
+    // MARK: - Load
+
+    private func loadSuggestions() async {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
+        suggestions = await IVScanner.shared.quickScan(limit: 10)
     }
 }
