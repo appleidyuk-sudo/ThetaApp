@@ -20,6 +20,12 @@ struct ContentView: View {
                     Text("Positions")
                 }
 
+            BacktestView()
+                .tabItem {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("Backtest")
+                }
+
             SettingsView()
                 .tabItem {
                     Image(systemName: "gearshape.fill")

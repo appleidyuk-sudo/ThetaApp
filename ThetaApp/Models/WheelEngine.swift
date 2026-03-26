@@ -321,7 +321,6 @@ actor WheelEngine {
         guard let chain = try? await yahoo.fetchOptionChain(symbol: symbol) else { return nil }
 
         // Find expiration closest to target DTE
-        let targetDate = Calendar.current.date(byAdding: .day, value: config.targetDTE, to: Date())!
         let targetDTE = config.targetDTE
 
         // Get all expirations and find best match

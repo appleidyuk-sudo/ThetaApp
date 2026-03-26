@@ -23,6 +23,9 @@
 		A1000001000000000000000E /* IVScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000E /* IVScanner.swift */; };
 		A1000001000000000000000F /* HelpSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000000F /* HelpSheet.swift */; };
 		A10000010000000000000010 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000010 /* AppVersion.swift */; };
+		A10000010000000000000011 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000011 /* NotificationManager.swift */; };
+		A10000010000000000000012 /* BacktestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000012 /* BacktestEngine.swift */; };
+		A10000010000000000000013 /* BacktestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* BacktestView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +45,9 @@
 		A2000001000000000000000E /* IVScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IVScanner.swift; sourceTree = "<group>"; };
 		A2000001000000000000000F /* HelpSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000010 /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
+		A20000010000000000000011 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		A20000010000000000000012 /* BacktestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestEngine.swift; sourceTree = "<group>"; };
+		A20000010000000000000013 /* BacktestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestView.swift; sourceTree = "<group>"; };
 		A20000010000000000000099 /* ThetaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThetaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -85,6 +91,8 @@
 				A20000010000000000000006 /* WheelEngine.swift */,
 				A20000010000000000000007 /* ThetaStore.swift */,
 				A2000001000000000000000E /* IVScanner.swift */,
+				A20000010000000000000011 /* NotificationManager.swift */,
+				A20000010000000000000012 /* BacktestEngine.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -97,6 +105,7 @@
 				A20000010000000000000009 /* WatchlistView.swift */,
 				A2000001000000000000000A /* SettingsView.swift */,
 				A2000001000000000000000B /* PositionDetailView.swift */,
+				A20000010000000000000013 /* BacktestView.swift */,
 				A2000001000000000000000F /* HelpSheet.swift */,
 			);
 			path = Views;
@@ -203,6 +212,9 @@
 				A1000001000000000000000E /* IVScanner.swift in Sources */,
 				A1000001000000000000000F /* HelpSheet.swift in Sources */,
 				A10000010000000000000010 /* AppVersion.swift in Sources */,
+				A10000010000000000000011 /* NotificationManager.swift in Sources */,
+				A10000010000000000000012 /* BacktestEngine.swift in Sources */,
+				A10000010000000000000013 /* BacktestView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +349,7 @@
 				DEVELOPMENT_TEAM = 2ZR8FKN2VM;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThetaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Theta Wheel Mistro";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -368,6 +381,7 @@
 				DEVELOPMENT_TEAM = 2ZR8FKN2VM;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ThetaApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Theta Wheel Mistro";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

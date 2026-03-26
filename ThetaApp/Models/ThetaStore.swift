@@ -146,8 +146,75 @@ class ThetaStore: ObservableObject {
         )
         snapshots.append(snapshot)
 
+        // Fire notifications for each trade
+        let nm = NotificationManager.shared
+        for trade in newTrades {
+            switch trade.action {
+            case .sellToOpen:
+                nm.notifyOptionWritten(
+                    symbol: trade.symbol,
+                    contract: trade.note,
+                    premium: trade.price
+                )
+            case .roll:
+                nm.notifyRoll(
+                    symbol: trade.symbol,
+                    from: "", to: "",
+                    netCredit: trade.totalAmount,
+                    reason: trade.note.components(separatedBy: ":").first ?? "Roll"
+                )
+            case .assignment:
+                nm.notifyAssignment(
+                    symbol: trade.symbol,
+                    shares: trade.quantity,
+                    strike: trade.strike ?? 0
+                )
+            case .calledAway:
+                nm.notifyCalledAway(
+                    symbol: trade.symbol,
+                    shares: trade.quantity,
+                    strike: trade.strike ?? 0,
+                    cyclePnl: trade.totalAmount
+                )
+            case .expired:
+                nm.notifyExpired(
+                    symbol: trade.symbol,
+                    contract: trade.note,
+                    premiumKept: trade.totalAmount
+                )
+            case .buyToClose:
+                break
+            }
+        }
+
+        // Check for approaching roll triggers
+        for pos in positions {
+            if let opt = pos.currentActiveOption, !opt.isClosed {
+                if opt.dte <= config.rollDTE + 5 && opt.dte > config.rollDTE {
+                    nm.notifyRollApproaching(
+                        symbol: pos.symbol,
+                        contract: opt.contract.displayLabel,
+                        reason: "DTE approaching \(config.rollDTE)d",
+                        dte: opt.dte,
+                        pnlPct: opt.pnlPercent
+                    )
+                } else if opt.pnlPercent >= config.rollPnlTarget - 0.10 && opt.pnlPercent < config.rollPnlTarget {
+                    nm.notifyRollApproaching(
+                        symbol: pos.symbol,
+                        contract: opt.contract.displayLabel,
+                        reason: "P&L approaching \(fmtPct(config.rollPnlTarget))",
+                        dte: opt.dte,
+                        pnlPct: opt.pnlPercent
+                    )
+                }
+            }
+        }
+
         if newTrades.isEmpty {
             statusMessage = "No trades this cycle"
+            if !positions.isEmpty {
+                nm.notifyNoTrades(positionCount: positions.count)
+            }
         } else {
             statusMessage = "\(newTrades.count) trade(s) executed"
         }

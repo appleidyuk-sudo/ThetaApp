@@ -6,6 +6,7 @@ enum HelpScreen {
     case dashboard
     case positions
     case settings
+    case backtest
 }
 
 struct HelpSheet: View {
@@ -23,6 +24,7 @@ struct HelpSheet: View {
                         case .dashboard:  dashboardHelp
                         case .positions:  positionsHelp
                         case .settings:   settingsHelp
+                        case .backtest:   backtestHelp
                         }
                     }
                     .padding()
@@ -44,6 +46,7 @@ struct HelpSheet: View {
         case .dashboard: return "Dashboard Help"
         case .positions: return "Positions Help"
         case .settings:  return "Settings Help"
+        case .backtest:  return "Backtest Help"
         }
     }
 
@@ -220,6 +223,64 @@ struct HelpSheet: View {
             helpSection("Execution", items: [
                 "Refresh Interval — minutes between auto-execution cycles",
                 "Auto Execute — enable/disable the automatic wheel timer",
+            ])
+        }
+    }
+
+    // MARK: - Backtest Help
+
+    private var backtestHelp: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
+            helpSection("What is Backtesting?", items: [
+                "Simulates The Wheel on real historical price data",
+                "Shows what would have happened if you ran the strategy in the past",
+                "Uses your current Settings (delta, DTE, roll targets) for the simulation",
+                "Results are estimates — past performance does not predict future results",
+            ])
+
+            helpSection("How to Run", items: [
+                "Enter a stock symbol (e.g. AAPL, NVDA, SPY)",
+                "Choose a time period (6mo, 1yr, 2yr, 3yr)",
+                "Tap RUN — fetches historical data from Yahoo and simulates",
+                "Quick-launch chips at bottom run popular symbols instantly",
+            ])
+
+            helpSection("Summary Metrics", items: [
+                "Total Return — overall gain/loss as a percentage",
+                "Annualized — return normalized to a yearly rate",
+                "Premium — total option premium collected during the period",
+                "Max Drawdown — worst peak-to-trough decline (risk measure)",
+                "Sharpe Ratio — risk-adjusted return (>1.0 is good, >2.0 is excellent)",
+                "Win Rate — percentage of trades that were profitable",
+                "Trades — total number of options written, rolled, or expired",
+                "Cycles — completed put→assign→call→called away wheel rounds",
+            ])
+
+            helpSection("Equity Curve Chart", items: [
+                "Gold line — your portfolio value (NLV) over time",
+                "Green fill — periods above starting cash (profit)",
+                "Red fill — periods below starting cash (drawdown)",
+            ])
+
+            helpSection("Premium Chart", items: [
+                "Shows cumulative premium collected over time",
+                "Steeper slope = collecting premium faster",
+                "Flat periods mean no new options were written",
+            ])
+
+            helpSection("Trade Log", items: [
+                "STO PUT (orange) — sold a cash-secured put",
+                "STO CALL (green) — sold a covered call",
+                "ROLL (yellow) — closed and reopened at new strike/date",
+                "ASSIGNED (red) — put expired ITM, bought shares",
+                "CALLED (blue) — call expired ITM, sold shares",
+                "EXPIRED (green) — option expired worthless, kept premium",
+            ])
+
+            helpSection("Option Pricing Note", items: [
+                "Backtest uses Black-Scholes with historical volatility",
+                "Real option prices may differ due to supply/demand and IV skew",
+                "Results are a reasonable approximation, not exact replays",
             ])
         }
     }
