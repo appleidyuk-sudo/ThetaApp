@@ -8,8 +8,16 @@ actor WheelEngine {
     private let config: ThetaConfig
     private let yahoo = YahooFinanceService.shared
 
+    /// Diagnostic log — published via ThetaStore.statusMessage
+    var lastDiagnostic: String = ""
+
     init(config: ThetaConfig) {
         self.config = config
+    }
+
+    private func log(_ msg: String) {
+        lastDiagnostic = msg
+        print("[WheelEngine] \(msg)")
     }
 
     // MARK: - Main Execution Loop
@@ -17,6 +25,7 @@ actor WheelEngine {
     /// Run one cycle of the wheel strategy for all positions
     func execute(positions: inout [WheelPosition], cash: inout Double, nlv: Double) async -> [TradeRecord] {
         var trades: [TradeRecord] = []
+        log("Executing for \(positions.count) positions, cash=\(fmtDollar(cash)), nlv=\(fmtDollar(nlv))")
 
         // Phase 1: Check existing positions for rolls/closes/expirations
         for i in positions.indices {
@@ -31,6 +40,7 @@ actor WheelEngine {
             }
         }
 
+        log("Cycle done: \(trades.count) trades")
         return trades
     }
 
@@ -40,8 +50,12 @@ actor WheelEngine {
         var trades: [TradeRecord] = []
 
         // Update current price
-        if let quote = try? await yahoo.fetchQuote(symbol: position.symbol) {
+        do {
+            let quote = try await yahoo.fetchQuote(symbol: position.symbol)
             position.currentPrice = quote.price
+            log("\(position.symbol) price=\(fmtPrice(quote.price))")
+        } catch {
+            log("\(position.symbol) price fetch failed: \(error.localizedDescription)")
         }
 
         // Check active options
@@ -89,13 +103,12 @@ actor WheelEngine {
         }
 
         // Rule 3: ITM handling
-        let isITM: Bool
         switch option.contract.optionType {
         case .put:
-            isITM = stockPrice < option.contract.strike
+            let isITM = stockPrice < option.contract.strike
             if isITM && config.rollPutsITM { return .itm }
         case .call:
-            isITM = stockPrice > option.contract.strike
+            let isITM = stockPrice > option.contract.strike
             if isITM && config.rollCallsITM { return .itm }
         }
 
@@ -115,7 +128,7 @@ actor WheelEngine {
         cash -= closeCost
 
         // Find and open new option
-        guard let newContract = await findEligibleContract(
+        guard let newContract = await findOrSynthesizeContract(
             symbol: position.symbol,
             optionType: option.contract.optionType,
             stockPrice: position.currentPrice,
@@ -168,10 +181,8 @@ actor WheelEngine {
         }
 
         if isITM {
-            // Assignment
             switch option.contract.optionType {
             case .put:
-                // Assigned: buy 100 shares at strike price
                 let shares = 100 * abs(option.quantity)
                 let cost = option.contract.strike * Double(shares)
                 position.shares += shares
@@ -180,20 +191,14 @@ actor WheelEngine {
                 position.phase = .assigned
 
                 closeOption(&position, option: option, action: .assignment, premium: 0)
-
                 trades.append(TradeRecord(
-                    symbol: position.symbol,
-                    action: .assignment,
-                    optionType: .put,
-                    strike: option.contract.strike,
-                    quantity: shares,
-                    price: option.contract.strike,
-                    totalAmount: -cost,
+                    symbol: position.symbol, action: .assignment, optionType: .put,
+                    strike: option.contract.strike, quantity: shares,
+                    price: option.contract.strike, totalAmount: -cost,
                     note: "Put assigned: bought \(shares) shares @ \(fmtPrice(option.contract.strike))"
                 ))
 
             case .call:
-                // Called away: sell 100 shares at strike price
                 let shares = min(position.shares, 100 * abs(option.quantity))
                 let proceeds = option.contract.strike * Double(shares)
                 position.shares -= shares
@@ -206,31 +211,20 @@ actor WheelEngine {
                 }
 
                 closeOption(&position, option: option, action: .calledAway, premium: 0)
-
                 trades.append(TradeRecord(
-                    symbol: position.symbol,
-                    action: .calledAway,
-                    optionType: .call,
-                    strike: option.contract.strike,
-                    quantity: shares,
-                    price: option.contract.strike,
-                    totalAmount: proceeds,
+                    symbol: position.symbol, action: .calledAway, optionType: .call,
+                    strike: option.contract.strike, quantity: shares,
+                    price: option.contract.strike, totalAmount: proceeds,
                     note: "Called away: sold \(shares) shares @ \(fmtPrice(option.contract.strike))"
                 ))
             }
         } else {
-            // Expired worthless — keep the premium
             closeOption(&position, option: option, action: .expired, premium: 0)
-
             trades.append(TradeRecord(
-                symbol: position.symbol,
-                action: .expired,
+                symbol: position.symbol, action: .expired,
                 optionType: option.contract.optionType,
-                strike: option.contract.strike,
-                expiration: option.contract.expiration,
-                quantity: abs(option.quantity),
-                price: 0,
-                totalAmount: 0,
+                strike: option.contract.strike, expiration: option.contract.expiration,
+                quantity: abs(option.quantity), price: 0, totalAmount: 0,
                 note: "Expired worthless — premium kept"
             ))
         }
@@ -242,7 +236,16 @@ actor WheelEngine {
 
     private func writeNewOption(_ position: inout WheelPosition, cash: inout Double, nlv: Double) async -> TradeRecord? {
         // Skip if already has an active option
-        if position.currentActiveOption != nil { return nil }
+        if position.currentActiveOption != nil {
+            log("\(position.symbol) skip: already has active option")
+            return nil
+        }
+
+        // Need a valid price
+        if position.currentPrice <= 0 {
+            log("\(position.symbol) skip: price is \(position.currentPrice)")
+            return nil
+        }
 
         // Determine what to write based on phase
         let optionType: OptionType
@@ -254,30 +257,41 @@ actor WheelEngine {
             optionType = .call
             position.phase = .sellingCalls
         case .sellingPuts:
-            optionType = .put   // already in put phase, proceed to write
+            optionType = .put
         case .sellingCalls:
-            optionType = .call  // already in call phase, proceed to write
+            optionType = .call
         }
+
+        log("\(position.symbol) phase=\(position.phase.rawValue) writing \(optionType.rawValue) price=\(fmtPrice(position.currentPrice))")
 
         // Check write threshold
         if config.writeThreshold > 0 {
             if let quote = try? await yahoo.fetchQuote(symbol: position.symbol) {
                 if abs(quote.dailyChangePct) < config.writeThreshold {
-                    return nil  // Not enough movement
+                    log("\(position.symbol) skip: daily change \(fmtPct(quote.dailyChangePct)) below threshold \(fmtPct(config.writeThreshold))")
+                    return nil
                 }
             }
         }
 
-        // Find eligible contract
-        guard let contract = await findEligibleContract(
+        // Find eligible contract (tries Yahoo chain first, falls back to synthetic)
+        guard let contract = await findOrSynthesizeContract(
             symbol: position.symbol,
             optionType: optionType,
             stockPrice: position.currentPrice,
             strikeLimit: calculateStrikeLimit(position: position, optionType: optionType)
-        ) else { return nil }
+        ) else {
+            log("\(position.symbol) FAILED: could not find or synthesize contract")
+            return nil
+        }
+
+        log("\(position.symbol) found contract: \(contract.displayLabel) premium=\(fmtPrice(contract.premium)) delta=\(fmtDelta(contract.delta))")
 
         // Check minimum credit
-        guard config.meetsMinimumCredit(contract.premium) else { return nil }
+        guard config.meetsMinimumCredit(contract.premium) else {
+            log("\(position.symbol) skip: premium \(fmtPrice(contract.premium)) below min \(fmtPrice(config.minimumCredit))")
+            return nil
+        }
 
         // Calculate quantity
         let quantity = calculateQuantity(
@@ -287,12 +301,17 @@ actor WheelEngine {
             nlv: nlv,
             cash: cash
         )
-        guard quantity > 0 else { return nil }
+        guard quantity > 0 else {
+            log("\(position.symbol) skip: quantity=0 (cash=\(fmtDollar(cash)), price=\(fmtPrice(position.currentPrice)))")
+            return nil
+        }
+
+        log("\(position.symbol) STO \(quantity) contracts")
 
         // Execute: sell to open
         let newOption = ActiveOption(
             contract: contract,
-            quantity: -quantity,  // negative = short
+            quantity: -quantity,
             openPremium: contract.premium
         )
         position.activeOptions.append(newOption)
@@ -314,61 +333,156 @@ actor WheelEngine {
         )
     }
 
-    // MARK: - Find Eligible Contract (ported from thetagang)
+    // MARK: - Find or Synthesize Contract
+
+    /// Try Yahoo option chain first; if it fails, generate a synthetic contract via Black-Scholes
+    private func findOrSynthesizeContract(symbol: String, optionType: OptionType,
+                                          stockPrice: Double, strikeLimit: Double?) async -> OptionContract? {
+        // Try real option chain first
+        if let real = await findEligibleContract(symbol: symbol, optionType: optionType,
+                                                 stockPrice: stockPrice, strikeLimit: strikeLimit) {
+            log("\(symbol) using real chain contract")
+            return real
+        }
+
+        // Fallback: synthetic contract using Black-Scholes
+        log("\(symbol) option chain failed — using synthetic contract")
+        return synthesizeContract(symbol: symbol, optionType: optionType, stockPrice: stockPrice)
+    }
+
+    /// Generate a synthetic option contract using Black-Scholes pricing
+    private func synthesizeContract(symbol: String, optionType: OptionType, stockPrice: Double) -> OptionContract? {
+        guard stockPrice > 0 else { return nil }
+
+        let dte = config.targetDTE
+        let t = Double(dte) / 365.0
+
+        // Fetch historical vol if possible, otherwise use 30% annual default
+        // (we can't await here easily, so use a reasonable default)
+        let annualVol = 0.30  // conservative default
+
+        // Calculate strike from target delta using inverse normal
+        let zScore = invNormalCDF(1.0 - config.targetDelta)
+        let stdMove = stockPrice * annualVol * sqrt(t)
+
+        let strike: Double
+        switch optionType {
+        case .put:
+            strike = ((stockPrice - zScore * stdMove) * 2).rounded() / 2  // round to $0.50
+        case .call:
+            strike = ((stockPrice + zScore * stdMove) * 2).rounded() / 2
+        }
+
+        guard strike > 0 else { return nil }
+
+        // Black-Scholes pricing
+        let d1 = (Foundation.log(stockPrice / strike) + (0.5 * annualVol * annualVol) * t) / (annualVol * sqrt(t))
+        let d2 = d1 - annualVol * sqrt(t)
+
+        let premium: Double
+        switch optionType {
+        case .call:
+            premium = max(0.05, stockPrice * normalCDF(d1) - strike * normalCDF(d2))
+        case .put:
+            premium = max(0.05, strike * normalCDF(-d2) - stockPrice * normalCDF(-d1))
+        }
+
+        let expiration = Calendar.current.date(byAdding: .day, value: dte, to: Date())!
+
+        log("\(symbol) synthetic: strike=\(fmtStrike(strike)) premium=\(fmtPrice(premium)) dte=\(dte)")
+
+        return OptionContract(
+            symbol: symbol,
+            optionType: optionType,
+            strike: strike,
+            expiration: expiration,
+            delta: config.targetDelta,
+            premium: premium,
+            openInterest: 0,
+            impliedVol: annualVol
+        )
+    }
+
+    // MARK: - Find Eligible Contract (Yahoo chain)
 
     func findEligibleContract(symbol: String, optionType: OptionType,
                               stockPrice: Double, strikeLimit: Double?) async -> OptionContract? {
-        guard let chain = try? await yahoo.fetchOptionChain(symbol: symbol) else { return nil }
+        guard stockPrice > 0 else {
+            log("\(symbol) findEligible: stockPrice is 0")
+            return nil
+        }
+
+        let chain: OptionChainData
+        do {
+            chain = try await yahoo.fetchOptionChain(symbol: symbol)
+        } catch {
+            log("\(symbol) option chain fetch failed: \(error.localizedDescription)")
+            return nil
+        }
+
+        guard !chain.expirations.isEmpty else {
+            log("\(symbol) no expirations in chain")
+            return nil
+        }
 
         // Find expiration closest to target DTE
         let targetDTE = config.targetDTE
-
-        // Get all expirations and find best match
         let sortedExps = chain.expirations.sorted()
         guard let bestExp = sortedExps.min(by: {
             abs(Calendar.current.dateComponents([.day], from: Date(), to: $0).day! - targetDTE)
             < abs(Calendar.current.dateComponents([.day], from: Date(), to: $1).day! - targetDTE)
-        }) else { return nil }
+        }) else {
+            log("\(symbol) no best expiration found")
+            return nil
+        }
 
-        // Fetch chain for that expiration
-        guard let expChain = try? await yahoo.fetchOptionChain(symbol: symbol, expiration: bestExp) else { return nil }
+        // Fetch chain for that specific expiration
+        let expChain: OptionChainData
+        do {
+            expChain = try await yahoo.fetchOptionChain(symbol: symbol, expiration: bestExp)
+        } catch {
+            log("\(symbol) expiration chain fetch failed: \(error.localizedDescription)")
+            return nil
+        }
 
         let quotes = optionType == .put ? expChain.puts : expChain.calls
+        log("\(symbol) got \(quotes.count) \(optionType.rawValue) quotes for exp \(bestExp)")
+
+        guard !quotes.isEmpty else {
+            log("\(symbol) no quotes for \(optionType.rawValue)")
+            return nil
+        }
 
         // Filter by open interest and strike limit
         let filtered = quotes.filter { q in
             q.openInterest >= config.minOpenInterest &&
             q.midpoint > 0 &&
-            (strikeLimit == nil || (optionType == .put ? q.strike <= strikeLimit! : q.strike >= strikeLimit!))
+            (strikeLimit == nil || strikeLimit! <= 0 ||
+             (optionType == .put ? q.strike <= strikeLimit! : q.strike >= strikeLimit!))
         }
+
+        log("\(symbol) \(filtered.count) quotes after filter (OI>=\(config.minOpenInterest), strikeLimit=\(strikeLimit.map { fmtPrice($0) } ?? "none"))")
 
         // Find contract closest to target delta
         let target = config.targetDelta
-        guard let best = filtered.min(by: {
-            abs($0.delta - target) < abs($1.delta - target)
-        }) else {
-            // Fallback: pick OTM strike closest to target delta distance from current price
-            return selectByStrikeDistance(quotes: quotes, stockPrice: stockPrice,
-                                         optionType: optionType, expiration: bestExp, symbol: symbol)
+        if let best = filtered.min(by: { abs($0.delta - target) < abs($1.delta - target) }) {
+            return OptionContract(
+                symbol: symbol, optionType: optionType,
+                strike: best.strike, expiration: best.expiration,
+                delta: best.delta, premium: best.midpoint,
+                openInterest: best.openInterest, impliedVol: best.impliedVol
+            )
         }
 
-        return OptionContract(
-            symbol: symbol,
-            optionType: optionType,
-            strike: best.strike,
-            expiration: best.expiration,
-            delta: best.delta,
-            premium: best.midpoint,
-            openInterest: best.openInterest,
-            impliedVol: best.impliedVol
-        )
+        // Fallback: pick OTM strike by distance from price (ignoring OI filter)
+        log("\(symbol) trying fallback by strike distance")
+        return selectByStrikeDistance(quotes: quotes, stockPrice: stockPrice,
+                                     optionType: optionType, expiration: bestExp, symbol: symbol)
     }
 
     /// Fallback: select strike by distance from stock price (approximating delta)
     private func selectByStrikeDistance(quotes: [OptionQuote], stockPrice: Double,
                                        optionType: OptionType, expiration: Date, symbol: String) -> OptionContract? {
-        // Target ~0.30 delta ≈ roughly 1 standard deviation OTM
-        // Approximate: strike about 5-8% OTM for 45 DTE
         let otmFactor = optionType == .put ? (1.0 - config.targetDelta * 0.3) : (1.0 + config.targetDelta * 0.3)
         let targetStrike = stockPrice * otmFactor
 
@@ -379,17 +493,16 @@ actor WheelEngine {
 
         guard let best = otm.min(by: {
             abs($0.strike - targetStrike) < abs($1.strike - targetStrike)
-        }) else { return nil }
+        }) else {
+            log("\(symbol) no OTM quotes found at all")
+            return nil
+        }
 
         return OptionContract(
-            symbol: symbol,
-            optionType: optionType,
-            strike: best.strike,
-            expiration: expiration,
-            delta: best.delta,
-            premium: best.midpoint,
-            openInterest: best.openInterest,
-            impliedVol: best.impliedVol
+            symbol: symbol, optionType: optionType,
+            strike: best.strike, expiration: expiration,
+            delta: best.delta, premium: best.midpoint,
+            openInterest: best.openInterest, impliedVol: best.impliedVol
         )
     }
 
@@ -397,24 +510,25 @@ actor WheelEngine {
 
     private func calculateQuantity(position: WheelPosition, optionType: OptionType,
                                    stockPrice: Double, nlv: Double, cash: Double) -> Int {
+        guard stockPrice > 0 else { return 0 }
+
         switch optionType {
         case .put:
-            // Number of puts = target shares / 100
             let targetValue = position.weight * config.buyingPower(nlv: nlv)
             let targetShares = Int(targetValue / stockPrice)
             let targetContracts = max(1, targetShares / 100)
 
-            // Cap by max new contracts percent
             let maxValue = config.maxNewContractValue(nlv: nlv)
             let maxContracts = max(1, Int(maxValue / (stockPrice * 100)))
 
-            // Cap by available cash (need to cover assignment)
+            // Cash needed to cover assignment
             let cashContracts = Int(cash / (stockPrice * 100))
 
-            return min(targetContracts, min(maxContracts, cashContracts))
+            let result = min(targetContracts, min(maxContracts, max(0, cashContracts)))
+            log("\(position.symbol) qty calc: target=\(targetContracts), max=\(maxContracts), cash=\(cashContracts) → \(result)")
+            return result
 
         case .call:
-            // Number of calls = shares owned / 100, capped by callCapFactor
             let maxCalls = Int(Double(position.shares) / 100.0 * config.callCapFactor)
             return max(0, maxCalls)
         }
@@ -425,10 +539,8 @@ actor WheelEngine {
     private func calculateStrikeLimit(position: WheelPosition, optionType: OptionType) -> Double? {
         switch optionType {
         case .put:
-            // Don't sell puts above current price (stay OTM)
-            return position.currentPrice
+            return position.currentPrice  // stay OTM
         case .call:
-            // Don't sell calls below cost basis (protect from selling at a loss)
             if config.maintainHighWaterMark && position.avgCost > 0 {
                 return position.avgCost
             }
@@ -438,7 +550,6 @@ actor WheelEngine {
 
     // MARK: - Premium Estimation
 
-    /// Estimate current premium based on time decay and stock movement
     func estimateCurrentPremium(option: ActiveOption, stockPrice: Double) -> Double {
         let contract = option.contract
         let dte = max(1, contract.dte)
@@ -446,20 +557,15 @@ actor WheelEngine {
             [.day], from: option.openDate, to: contract.expiration
         ).day ?? 45)
 
-        // Time decay factor (theta decay is roughly sqrt of time ratio)
         let timeRatio = Double(dte) / Double(originalDTE)
         let timeFactor = sqrt(timeRatio)
 
-        // Intrinsic value
         let intrinsic: Double
         switch contract.optionType {
-        case .put:
-            intrinsic = max(0, contract.strike - stockPrice)
-        case .call:
-            intrinsic = max(0, stockPrice - contract.strike)
+        case .put:  intrinsic = max(0, contract.strike - stockPrice)
+        case .call: intrinsic = max(0, stockPrice - contract.strike)
         }
 
-        // Extrinsic = original premium * time decay factor
         let originalExtrinsic = max(0, option.openPremium - max(0, contract.optionType == .put
             ? contract.strike - stockPrice : stockPrice - contract.strike))
         let currentExtrinsic = originalExtrinsic * timeFactor
@@ -467,7 +573,7 @@ actor WheelEngine {
         return intrinsic + currentExtrinsic
     }
 
-    // MARK: - Volatility Calculation (for write threshold sigma)
+    // MARK: - Volatility Calculation
 
     func calculateDailyStdDev(symbol: String) async -> Double? {
         guard let prices = try? await yahoo.fetchHistory(symbol: symbol, days: config.dailyStddevWindow + 10) else {
@@ -475,19 +581,54 @@ actor WheelEngine {
         }
         guard prices.count >= 2 else { return nil }
 
-        // Calculate log returns
         var logReturns: [Double] = []
         for i in 1..<prices.count {
             if prices[i] > 0 && prices[i-1] > 0 {
-                logReturns.append(log(prices[i] / prices[i-1]))
+                logReturns.append(Foundation.log(prices[i] / prices[i-1]))
             }
         }
 
         guard logReturns.count >= 2 else { return nil }
-
         let mean = logReturns.reduce(0, +) / Double(logReturns.count)
         let variance = logReturns.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(logReturns.count - 1)
         return sqrt(variance)
+    }
+
+    // MARK: - Normal Distribution Helpers
+
+    private func normalCDF(_ x: Double) -> Double {
+        return 0.5 * erfc(-x / sqrt(2.0))
+    }
+
+    private func invNormalCDF(_ p: Double) -> Double {
+        guard p > 0 && p < 1 else { return 0 }
+        let a: [Double] = [-3.969683028665376e+01, 2.209460984245205e+02,
+                           -2.759285104469687e+02, 1.383577518672690e+02,
+                           -3.066479806614716e+01, 2.506628277459239e+00]
+        let b: [Double] = [-5.447609879822406e+01, 1.615858368580409e+02,
+                           -1.556989798598866e+02, 6.680131188771972e+01,
+                           -1.328068155288572e+01]
+        let c: [Double] = [-7.784894002430293e-03, -3.223964580411365e-01,
+                           -2.400758277161838e+00, -2.549732539343734e+00,
+                           4.374664141464968e+00,  2.938163982698783e+00]
+        let d: [Double] = [7.784695709041462e-03, 3.224671290700398e-01,
+                           2.445134137142996e+00, 3.754408661907416e+00]
+        let pLow = 0.02425
+        let pHigh = 1 - pLow
+        if p < pLow {
+            let q = sqrt(-2 * Foundation.log(p))
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
+        } else if p <= pHigh {
+            let q = p - 0.5
+            let r = q * q
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1)
+        } else {
+            let q = sqrt(-2 * Foundation.log(1 - p))
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
+        }
     }
 
     // MARK: - Helpers

@@ -132,6 +132,10 @@ class ThetaStore: ObservableObject {
             nlv: netLiquidation
         )
 
+        // Surface engine diagnostics
+        let diagnostic = await engine.lastDiagnostic
+        print("[ThetaStore] Engine diagnostic: \(diagnostic)")
+
         positions = mutablePositions
         cash = mutableCash
         trades.insert(contentsOf: newTrades, at: 0)
